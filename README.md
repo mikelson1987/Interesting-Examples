@@ -16,3 +16,18 @@ void consumer()
     read(f);
   }
 } // close all files
+
+-------------------------------------------------
+Выгрузка объектов при "ненужности"
+
+std::shared_ptr<const Widget> fastLoadWidget (Widget ID id);
+{
+static std::unordered_map<WidgetID, std::weak_ptr<const Widget>> cache ;
+auto objPtr           // obj Ptr является std: : shared_ptr
+= cache[id].lock();   // для кешированного объекта и
+if (!objPtr) {
+  objPtr = loadWidget(id);
+  cache[id] = objPtr;
+}
+return objPtr;
+}
