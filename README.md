@@ -1,5 +1,6 @@
 # Interesting-Examples
-
+-------------------------------------------------------------
+//Использование move-семантики
 vector<ifstream> produce()
 {
   vector<ifstream> ans;
