@@ -32,3 +32,12 @@ if (!objPtr) {
 }
 return objPtr;
 }
+
+
+//Оптимизация запроса Sql запроса
+
+UPDATE TableName
+SET A = @VALUE
+WHERE
+      B = 'YOUR CONDITION'
+            AND A <> @VALUE – VALIDATION
