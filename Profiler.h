@@ -1,136 +1,140 @@
 /*
-Profiler prof;
 
-for (;;)
+#ifdef linux
+#include <time.h>
+void Sleep(int milliseconds)
 {
-	Sleep(50); // code, which does not need to measure performance
+	struct timespec ts;
+	ts.tv_sec = milliseconds / 1000;
+	ts.tv_nsec = (milliseconds % 1000) * 1000000;
+	nanosleep(&ts, NULL);
+}
+#endif
 
-	prof(NULL);
+int main()
+{	Profiler prof;
 
-	Sleep(100); // some code
+	for(;;)
+	{	
+		Sleep(50); // code, which does not need to measure performance
 
-	prof("code1");
+		prof(NULL);
 
-	Sleep(200); // some code
+		Sleep(100); // some code
 
-	prof("code2");
+		prof("code1");
 
-	prof.periodic_dump(5);
-		// every 5 seconds will print table
+		Sleep(200); // some code
+
+		prof("code2");
+
+		prof.periodic_dump(5);
+			// every 5 seconds will print table
+	}
+	return 0;
 }
 */
 
 #include <stdint.h>
 #include <stdio.h>
 
+#include <vector>
+using std::vector;
+
 #include <string>
 using std::string;
 
-#include <set>
-using std::set;
+#include <map>
+using std::map;
 
 #include <algorithm>
 using std::min;
 using std::max;
 
-#ifdef WIN32
-#include <Windows.h>
+#include <utility>
+using std::make_pair;
 
-class Microseconds
-{
-public:
-	uint64_t operator()()
-	{
-		LARGE_INTEGER now;
-		QueryPerformanceCounter(&now);
-		LARGE_INTEGER freq;
-		QueryPerformanceFrequency(&freq);
+#include <iostream>
+using std::cout;
 
-		return now.QuadPart * 1000 / (freq.QuadPart / 1000);
-			// overflow occurs much later
-	}
-};
+#ifdef linux
+
+#include <sys/time.h>
+
+static uint64_t microseconds()
+{	timeval tv;
+	gettimeofday(&tv, NULL);
+	return (uint64_t)tv.tv_sec * 1000000 + tv.tv_usec;
+}
 
 #else
-#include <sys/time.h>
-//#include "android_workarround.h"
-class Microseconds
+
+#include <Windows.h>
+
+static uint64_t microseconds()
 {
-public:
-	uint64_t operator()()
-	{
-		timeval tv;
-		gettimeofday(&tv, NULL);
-		return (uint64_t)tv.tv_sec * 1000000 + tv.tv_usec;
-	}
-};
+	LARGE_INTEGER now;
+	QueryPerformanceCounter(&now);
+	LARGE_INTEGER freq;
+	QueryPerformanceFrequency(&freq);
+	return now.QuadPart * 1000 / (freq.QuadPart / 1000);
+		// overflow occurs much later
+}
+
 #endif
 
 class Profiler
-{
-	Microseconds microseconds;
-
+{	
 	class Event
 	{
-		public:
-		const char* name;
+	public:
 		uint64_t time;
 		uint64_t count;
 		uint64_t min_time;
 		uint64_t max_time;
 
 		void reset()
-		{
-			time = 0;
+		{	time = 0;
 			count = 0;
 			min_time = (uint64_t)-1;
 			max_time = 0;
 		}
 	};
 
-	class Comparator
-	{
-		public:
-		bool operator()(const Event& a, const Event& b) const
-		{	//return strcmp(a.name, b.name) < 0;
-			return (void*)a.name < (void*)b.name;
-		}
-	};
-
-	set<Event, Comparator> events;
+	map<const char*, Event> events;
 
 	uint64_t t0;
 	uint64_t last_dump;
 
-	Event c;
-	set<Event>::iterator i;
+	map<const char*, Event>::iterator i;
 
 public:
+	vector<string> out;
+
 	Profiler()
-	{
-		last_dump = t0 = microseconds();
+	{	last_dump = t0 = microseconds();
 	}
 
 	void operator()(const char* what)
-	{
+	{	
 		if (what == NULL)
 		{
 			t0 = microseconds();
 			return;
 		}
-
+		
 		uint64_t t = microseconds() - t0;
 
-		c.name = what;
-		i = events.find(c);
-
-		if (i == events.end())
-		{
-			c.reset();
-			i = events.insert(c).first;
+		i = events.find(what);
+		
+		if(i == events.end())
+		{	
+			Event e;
+			e.reset();
+			i = events.insert(make_pair(what, e)).first;
 		}
 
-		Event& e = const_cast<Event&>(*i);
+		Event& e = (*i).second;
 
 		e.time += t;
 		e.min_time = min(e.min_time, t);
@@ -142,41 +146,50 @@ public:
 
 	void dump()
 	{
-		const float MS = 0.001f;
+		out.clear();
 
-		float f_summ = 0;
+		const float us_to_ms = 0.001f;
+		
+		float summ = 0;
 		for (i = events.begin(); i != events.end(); ++i)
-			f_summ += (float)i->time;
+		{	
+			Event& e = (*i).second;
 
-		if (f_summ == 0) return;
+			summ += (float)e.time;
+		}
 
-		f_summ *= MS;
-		f_summ *= .01f; // %
+		if (summ == 0) return;
 
-		printf("           name count   total(%%)        min   avg   max\n");
+		summ *= us_to_ms;
 
-		for (i = events.begin(); i != events.end(); ++i)
+		out.push_back("           name count   total(%)        min   avg   max\n");
+
+		for(i = events.begin(); i != events.end(); ++i)
 		{
-			Event& e = const_cast<Event&>(*i);
+			Event& e = (*i).second;
 
-			if (e.count == 0) e.min_time = 0;
+			if(e.count == 0) e.min_time = 0;
 
-			float f_time = e.time * MS;
-			float f_min = e.min_time * MS;
-			float f_max = e.max_time * MS;
-			float f_average = e.count == 0 ? 0 : f_time / (float)e.count;
+			float time = e.time * us_to_ms;
+			float min_time = e.min_time * us_to_ms;
+			float max_time = e.max_time * us_to_ms;
+			float average = e.count == 0 ? 0 : time / (float)e.count;
 
-			printf("%15s %5llu %7.1f(%5.1f%%) %5.1f %5.1f %5.1f\n",
-				e.name, (long long unsigned int)e.count,
-				f_time, f_time / f_summ, f_min, f_average, f_max);
+			char tmp[0x100];
 
+			snprintf(tmp, sizeof(tmp), "%15s %5llu %7.1f(%5.1f%%) %5.1f %5.1f %5.1f\n",
+				i->first, (long long unsigned int)e.count,
+				time, time / summ * 100, min_time, average, max_time);
+			out.push_back(tmp);
+			
 			e.reset();
 		}
+
+		for (int i = 0; i < out.size(); ++i) cout << out[i];
 	}
 
 	void periodic_dump(unsigned int period)
-	{
-		if (microseconds() < last_dump + period * 1000000) return;
+	{	if(microseconds() < last_dump + period * 1000000) return;
 		dump();
 		last_dump = microseconds();
 	}
