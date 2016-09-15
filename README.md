@@ -41,3 +41,11 @@ SET A = @VALUE
 WHERE
       B = 'YOUR CONDITION'
             AND A <> @VALUE – VALIDATION
+
+
+----------------------------------------------------------------
+RAI - file
+
+auto deleter = [](FILE* f) {fclose(f);};
+std::unique_ptr<FILE, decltype(deleter)> p(fopen("1.txt", "w"),
+                                           deleter);
